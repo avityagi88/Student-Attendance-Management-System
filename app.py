@@ -28,6 +28,7 @@ if not st.session_state["logged_in"]:
 def get_connection():
     conn = sqlite3.connect("attendance.db", check_same_thread=False)
     cur = conn.cursor()
+    
     # Create tables if they don't exist
     cur.execute("""
     CREATE TABLE IF NOT EXISTS students (
@@ -43,6 +44,14 @@ def get_connection():
     )
     """)
     conn.commit()
+
+    # Preload sample students if table is empty
+    cur.execute("SELECT COUNT(*) FROM students")
+    if cur.fetchone()[0] == 0:
+        sample_students = [(1, "Avi Tyagi"), (2, "Rahul Sharma"), (3, "Priya Singh")]
+        cur.executemany("INSERT INTO students VALUES (?, ?)", sample_students)
+        conn.commit()
+    
     return conn, cur
 
 conn, cur = get_connection()
@@ -82,12 +91,22 @@ elif menu == "Mark Attendance":
     if len(students) == 0:
         st.warning("No students found. Please add students first.")
     else:
+        attendance_dict = {}
         for student in students:
-            status = st.radio(f"Roll {student[0]} - {student[1]}", ("Present", "Absent"), key=student[0])
-            if st.button(f"Save {student[1]}"):
-                cur.execute("INSERT INTO attendance VALUES (?, ?, ?)", (student[0], str(date.today()), status))
-                conn.commit()
-                st.success(f"Attendance saved for {student[1]}")
+            attendance_dict[student[0]] = st.radio(
+                f"Roll {student[0]} - {student[1]}",
+                ("Present", "Absent"),
+                key=student[0]
+            )
+
+        if st.button("Submit Attendance"):
+            for roll, status in attendance_dict.items():
+                cur.execute(
+                    "INSERT INTO attendance VALUES (?, ?, ?)",
+                    (roll, str(date.today()), status)
+                )
+            conn.commit()
+            st.success("Attendance saved successfully for all students")
 
 # -------------------- VIEW ATTENDANCE --------------------
 elif menu == "View Attendance":
@@ -98,13 +117,12 @@ elif menu == "View Attendance":
         FROM attendance
         JOIN students ON students.roll = attendance.roll
         """, conn)
-
         if df.empty:
             st.warning("No attendance records found.")
         else:
             st.dataframe(df)
-    except Exception as e:
-        st.error("No attendance data available yet.")
+    except:
+        st.warning("No attendance records found.")
 
 # -------------------- MONTHLY REPORT --------------------
 elif menu == "Monthly Report":
@@ -117,19 +135,17 @@ elif menu == "Monthly Report":
         FROM attendance
         JOIN students ON students.roll = attendance.roll
         """, conn)
-
         if df.empty:
             st.warning("No attendance records found.")
         else:
             df["month"] = df["date"].str[5:7]
             monthly_df = df[df["month"] == month]
-
             if monthly_df.empty:
                 st.info("No records found for this month.")
             else:
                 st.dataframe(monthly_df)
-    except Exception as e:
-        st.error("No attendance data available yet.")
+    except:
+        st.warning("No attendance records found.")
 
 # -------------------- EXPORT TO EXCEL --------------------
 elif menu == "Export to Excel":
@@ -140,7 +156,6 @@ elif menu == "Export to Excel":
         FROM attendance
         JOIN students ON students.roll = attendance.roll
         """, conn)
-
         if df.empty:
             st.warning("No data to export.")
         else:
@@ -153,8 +168,8 @@ elif menu == "Export to Excel":
                     file_name=file_name,
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
-    except Exception as e:
-        st.error("No attendance data available yet.")
+    except:
+        st.warning("No attendance records found.")
 
 # -------------------- LOGOUT --------------------
 elif menu == "Logout":
