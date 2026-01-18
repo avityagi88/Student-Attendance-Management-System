@@ -85,28 +85,39 @@ if menu == "Add Student":
 # -------------------- MARK ATTENDANCE --------------------
 elif menu == "Mark Attendance":
     st.subheader("📝 Mark Attendance")
+    
+    # Fetch all students
     cur.execute("SELECT * FROM students")
     students = cur.fetchall()
-
+    
     if len(students) == 0:
         st.warning("No students found. Please add students first.")
     else:
-        attendance_dict = {}
+        # Store selected attendance in session_state
+        if "attendance_dict" not in st.session_state:
+            st.session_state["attendance_dict"] = {student[0]: "Present" for student in students}
+        
+        # Display radio buttons
         for student in students:
-            attendance_dict[student[0]] = st.radio(
+            st.session_state["attendance_dict"][student[0]] = st.radio(
                 f"Roll {student[0]} - {student[1]}",
                 ("Present", "Absent"),
-                key=student[0]
+                index=0 if st.session_state["attendance_dict"][student[0]] == "Present" else 1,
+                key=f"attendance_{student[0]}"
             )
-
+        
+        # Single submit button
         if st.button("Submit Attendance"):
-            for roll, status in attendance_dict.items():
+            for roll, status in st.session_state["attendance_dict"].items():
                 cur.execute(
                     "INSERT INTO attendance VALUES (?, ?, ?)",
                     (roll, str(date.today()), status)
                 )
             conn.commit()
             st.success("Attendance saved successfully for all students")
+            
+            # Clear session state after submit
+            st.session_state.pop("attendance_dict")
 
 # -------------------- VIEW ATTENDANCE --------------------
 elif menu == "View Attendance":
