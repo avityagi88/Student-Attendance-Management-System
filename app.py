@@ -3,7 +3,7 @@ import sqlite3
 import pandas as pd
 from datetime import date
 
-# ---------------- LOGIN ----------------
+# -------------------- LOGIN --------------------
 def login():
     st.title("🔐 Teacher Login")
 
@@ -12,19 +12,19 @@ def login():
 
     if st.button("Login"):
         if username == "admin" and password == "admin123":
-            st.session_state["login"] = True
+            st.session_state["logged_in"] = True
             st.success("Login Successful")
         else:
             st.error("Invalid Username or Password")
 
-if "login" not in st.session_state:
-    st.session_state["login"] = False
+if "logged_in" not in st.session_state:
+    st.session_state["logged_in"] = False
 
-if not st.session_state["login"]:
+if not st.session_state["logged_in"]:
     login()
     st.stop()
 
-# ---------------- DATABASE ----------------
+# -------------------- DATABASE --------------------
 conn = sqlite3.connect("attendance.db", check_same_thread=False)
 cur = conn.cursor()
 
@@ -42,63 +42,86 @@ CREATE TABLE IF NOT EXISTS attendance (
     status TEXT
 )
 """)
+
 conn.commit()
 
-# ---------------- APP ----------------
+# -------------------- APP --------------------
 st.title("🎓 Student Attendance Management System")
 
 menu = st.sidebar.selectbox(
     "Menu",
-    ["Add Student", "Mark Attendance", "View Attendance", "Monthly Report", "Export to Excel"]
+    [
+        "Add Student",
+        "Mark Attendance",
+        "View Attendance",
+        "Monthly Report",
+        "Export to Excel",
+        "Logout"
+    ]
 )
 
-# ---------------- ADD STUDENT ----------------
+# -------------------- ADD STUDENT --------------------
 if menu == "Add Student":
     st.subheader("➕ Add Student")
 
-    roll = st.number_input("Roll Number", min_value=1)
+    roll = st.number_input("Roll Number", min_value=1, step=1)
     name = st.text_input("Student Name")
 
     if st.button("Add Student"):
-        cur.execute("INSERT INTO students VALUES (?, ?)", (roll, name))
-        conn.commit()
-        st.success("Student Added Successfully")
+        if name.strip() == "":
+            st.warning("Student name cannot be empty")
+        else:
+            try:
+                cur.execute("INSERT INTO students VALUES (?, ?)", (roll, name))
+                conn.commit()
+                st.success("Student Added Successfully")
+            except sqlite3.IntegrityError:
+                st.error("Roll number already exists")
 
-# ---------------- MARK ATTENDANCE ----------------
+# -------------------- MARK ATTENDANCE --------------------
 elif menu == "Mark Attendance":
     st.subheader("📝 Mark Attendance")
 
     cur.execute("SELECT * FROM students")
     students = cur.fetchall()
 
-    for student in students:
-        status = st.radio(
-            f"{student[0]} - {student[1]}",
-            ("Present", "Absent"),
-            key=student[0]
-        )
-
-        if st.button(f"Save {student[1]}"):
-            cur.execute(
-                "INSERT INTO attendance VALUES (?, ?, ?)",
-                (student[0], str(date.today()), status)
+    if len(students) == 0:
+        st.warning("No students found. Please add students first.")
+    else:
+        for student in students:
+            status = st.radio(
+                f"Roll {student[0]} - {student[1]}",
+                ("Present", "Absent"),
+                key=student[0]
             )
-            conn.commit()
-            st.success("Attendance Saved")
 
-# ---------------- VIEW ATTENDANCE ----------------
+            if st.button(f"Save {student[1]}"):
+                cur.execute(
+                    "INSERT INTO attendance VALUES (?, ?, ?)",
+                    (student[0], str(date.today()), status)
+                )
+                conn.commit()
+                st.success(f"Attendance saved for {student[1]}")
+
+# -------------------- VIEW ATTENDANCE --------------------
 elif menu == "View Attendance":
     st.subheader("📋 All Attendance Records")
 
-    df = pd.read_sql_query("""
-    SELECT students.roll, students.name, attendance.date, attendance.status
-    FROM attendance
-    JOIN students ON students.roll = attendance.roll
-    """, conn)
+    cur.execute("SELECT COUNT(*) FROM attendance")
+    count = cur.fetchone()[0]
 
-    st.dataframe(df)
+    if count == 0:
+        st.warning("No attendance records found.")
+    else:
+        df = pd.read_sql_query("""
+        SELECT students.roll, students.name, attendance.date, attendance.status
+        FROM attendance
+        JOIN students ON students.roll = attendance.roll
+        """, conn)
 
-# ---------------- MONTHLY REPORT ----------------
+        st.dataframe(df)
+
+# -------------------- MONTHLY REPORT --------------------
 elif menu == "Monthly Report":
     st.subheader("📅 Monthly Attendance Report")
 
@@ -107,34 +130,55 @@ elif menu == "Monthly Report":
         ["01","02","03","04","05","06","07","08","09","10","11","12"]
     )
 
-    df = pd.read_sql_query("""
-    SELECT students.roll, students.name, attendance.date, attendance.status
-    FROM attendance
-    JOIN students ON students.roll = attendance.roll
-    """, conn)
+    cur.execute("SELECT COUNT(*) FROM attendance")
+    count = cur.fetchone()[0]
 
-    df["month"] = df["date"].str[5:7]
-    monthly_df = df[df["month"] == month]
+    if count == 0:
+        st.warning("No attendance data available.")
+    else:
+        df = pd.read_sql_query("""
+        SELECT students.roll, students.name, attendance.date, attendance.status
+        FROM attendance
+        JOIN students ON students.roll = attendance.roll
+        """, conn)
 
-    st.dataframe(monthly_df)
+        df["month"] = df["date"].str[5:7]
+        monthly_df = df[df["month"] == month]
 
-# ---------------- EXPORT TO EXCEL ----------------
+        if len(monthly_df) == 0:
+            st.info("No records found for this month.")
+        else:
+            st.dataframe(monthly_df)
+
+# -------------------- EXPORT TO EXCEL --------------------
 elif menu == "Export to Excel":
     st.subheader("⬇ Export Attendance to Excel")
 
-    df = pd.read_sql_query("""
-    SELECT students.roll, students.name, attendance.date, attendance.status
-    FROM attendance
-    JOIN students ON students.roll = attendance.roll
-    """, conn)
+    cur.execute("SELECT COUNT(*) FROM attendance")
+    count = cur.fetchone()[0]
 
-    excel_file = "attendance_report.xlsx"
-    df.to_excel(excel_file, index=False)
+    if count == 0:
+        st.warning("No data to export.")
+    else:
+        df = pd.read_sql_query("""
+        SELECT students.roll, students.name, attendance.date, attendance.status
+        FROM attendance
+        JOIN students ON students.roll = attendance.roll
+        """, conn)
 
-    with open(excel_file, "rb") as f:
-        st.download_button(
-            label="Download Excel File",
-            data=f,
-            file_name="attendance_report.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+        file_name = "attendance_report.xlsx"
+        df.to_excel(file_name, index=False)
+
+        with open(file_name, "rb") as f:
+            st.download_button(
+                label="Download Excel File",
+                data=f,
+                file_name=file_name,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+
+# -------------------- LOGOUT --------------------
+elif menu == "Logout":
+    st.session_state["logged_in"] = False
+    st.success("Logged out successfully")
+    st.experimental_rerun()
