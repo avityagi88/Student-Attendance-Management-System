@@ -24,40 +24,35 @@ if not st.session_state["logged_in"]:
     login()
     st.stop()
 
-# -------------------- DATABASE --------------------
-conn = sqlite3.connect("attendance.db", check_same_thread=False)
-cur = conn.cursor()
+# -------------------- DATABASE CONNECTION --------------------
+def get_connection():
+    conn = sqlite3.connect("attendance.db", check_same_thread=False)
+    cur = conn.cursor()
+    # Create tables if they don't exist
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS students (
+        roll INTEGER PRIMARY KEY,
+        name TEXT
+    )
+    """)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS attendance (
+        roll INTEGER,
+        date TEXT,
+        status TEXT
+    )
+    """)
+    conn.commit()
+    return conn, cur
 
-cur.execute("""
-CREATE TABLE IF NOT EXISTS students (
-    roll INTEGER PRIMARY KEY,
-    name TEXT
-)
-""")
-
-cur.execute("""
-CREATE TABLE IF NOT EXISTS attendance (
-    roll INTEGER,
-    date TEXT,
-    status TEXT
-)
-""")
-
-conn.commit()
+conn, cur = get_connection()
 
 # -------------------- APP --------------------
 st.title("🎓 Student Attendance Management System")
 
 menu = st.sidebar.selectbox(
     "Menu",
-    [
-        "Add Student",
-        "Mark Attendance",
-        "View Attendance",
-        "Monthly Report",
-        "Export to Excel",
-        "Logout"
-    ]
+    ["Add Student", "Mark Attendance", "View Attendance", "Monthly Report", "Export to Excel", "Logout"]
 )
 
 # -------------------- ADD STUDENT --------------------
@@ -81,7 +76,6 @@ if menu == "Add Student":
 # -------------------- MARK ATTENDANCE --------------------
 elif menu == "Mark Attendance":
     st.subheader("📝 Mark Attendance")
-
     cur.execute("SELECT * FROM students")
     students = cur.fetchall()
 
@@ -89,93 +83,78 @@ elif menu == "Mark Attendance":
         st.warning("No students found. Please add students first.")
     else:
         for student in students:
-            status = st.radio(
-                f"Roll {student[0]} - {student[1]}",
-                ("Present", "Absent"),
-                key=student[0]
-            )
-
+            status = st.radio(f"Roll {student[0]} - {student[1]}", ("Present", "Absent"), key=student[0])
             if st.button(f"Save {student[1]}"):
-                cur.execute(
-                    "INSERT INTO attendance VALUES (?, ?, ?)",
-                    (student[0], str(date.today()), status)
-                )
+                cur.execute("INSERT INTO attendance VALUES (?, ?, ?)", (student[0], str(date.today()), status))
                 conn.commit()
                 st.success(f"Attendance saved for {student[1]}")
 
 # -------------------- VIEW ATTENDANCE --------------------
 elif menu == "View Attendance":
     st.subheader("📋 All Attendance Records")
-
-    cur.execute("SELECT COUNT(*) FROM attendance")
-    count = cur.fetchone()[0]
-
-    if count == 0:
-        st.warning("No attendance records found.")
-    else:
+    try:
         df = pd.read_sql_query("""
         SELECT students.roll, students.name, attendance.date, attendance.status
         FROM attendance
         JOIN students ON students.roll = attendance.roll
         """, conn)
 
-        st.dataframe(df)
+        if df.empty:
+            st.warning("No attendance records found.")
+        else:
+            st.dataframe(df)
+    except Exception as e:
+        st.error("No attendance data available yet.")
 
 # -------------------- MONTHLY REPORT --------------------
 elif menu == "Monthly Report":
     st.subheader("📅 Monthly Attendance Report")
+    month = st.selectbox("Select Month", ["01","02","03","04","05","06","07","08","09","10","11","12"])
 
-    month = st.selectbox(
-        "Select Month",
-        ["01","02","03","04","05","06","07","08","09","10","11","12"]
-    )
-
-    cur.execute("SELECT COUNT(*) FROM attendance")
-    count = cur.fetchone()[0]
-
-    if count == 0:
-        st.warning("No attendance data available.")
-    else:
+    try:
         df = pd.read_sql_query("""
         SELECT students.roll, students.name, attendance.date, attendance.status
         FROM attendance
         JOIN students ON students.roll = attendance.roll
         """, conn)
 
-        df["month"] = df["date"].str[5:7]
-        monthly_df = df[df["month"] == month]
-
-        if len(monthly_df) == 0:
-            st.info("No records found for this month.")
+        if df.empty:
+            st.warning("No attendance records found.")
         else:
-            st.dataframe(monthly_df)
+            df["month"] = df["date"].str[5:7]
+            monthly_df = df[df["month"] == month]
+
+            if monthly_df.empty:
+                st.info("No records found for this month.")
+            else:
+                st.dataframe(monthly_df)
+    except Exception as e:
+        st.error("No attendance data available yet.")
 
 # -------------------- EXPORT TO EXCEL --------------------
 elif menu == "Export to Excel":
     st.subheader("⬇ Export Attendance to Excel")
-
-    cur.execute("SELECT COUNT(*) FROM attendance")
-    count = cur.fetchone()[0]
-
-    if count == 0:
-        st.warning("No data to export.")
-    else:
+    try:
         df = pd.read_sql_query("""
         SELECT students.roll, students.name, attendance.date, attendance.status
         FROM attendance
         JOIN students ON students.roll = attendance.roll
         """, conn)
 
-        file_name = "attendance_report.xlsx"
-        df.to_excel(file_name, index=False)
-
-        with open(file_name, "rb") as f:
-            st.download_button(
-                label="Download Excel File",
-                data=f,
-                file_name=file_name,
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+        if df.empty:
+            st.warning("No data to export.")
+        else:
+            file_name = "attendance_report.xlsx"
+            df.to_excel(file_name, index=False)
+            with open(file_name, "rb") as f:
+                st.download_button(
+                    label="Download Excel File",
+                    data=f,
+                    file_name=file_name,
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+    except Exception as e:
+        st.error("No attendance data available yet.")
 
 # -------------------- LOGOUT --------------------
 elif menu == "Logout":
